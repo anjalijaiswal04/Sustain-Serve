@@ -1,6 +1,7 @@
 import { Link, Navigate } from 'react-router-dom';
 import { db } from '../utils/db';
 import { Leaf, Users, Truck, Heart, ArrowRight, ShieldCheck, Star } from 'lucide-react';
+import heroImage from '../utils/hero.jpg';
 
 export function LandingPage() {
   const user = db.getCurrentUser();
@@ -36,7 +37,11 @@ export function LandingPage() {
           </div>
           <div className="relative">
             <div className="absolute inset-0 bg-emerald-300 rounded-full blur-3xl opacity-30 animate-pulse"></div>
-            <img src="https://images.unsplash.com/photo-1593113565214-80afcb4a4771?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80" alt="People donating food" className="relative rounded-2xl shadow-2xl object-cover h-[500px] w-full" />
+            <img 
+  src={heroImage}
+  alt="People donating food"
+  className="relative rounded-2xl shadow-2xl object-cover h-[500px] w-full"
+/>
           </div>
         </div>
       </div>
