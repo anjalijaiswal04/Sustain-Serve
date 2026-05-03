@@ -1,15 +1,15 @@
 import { Link, Navigate } from 'react-router-dom';
-import { db } from '../utils/db';
+import { useAuth } from '../utils/authContext';
 import { Leaf, Users, Truck, Heart, ArrowRight, ShieldCheck, Star } from 'lucide-react';
 import heroImage from '../utils/hero.jpg';
 
 export function LandingPage() {
-  const user = db.getCurrentUser();
+  const { user } = useAuth();
   if (user) {
-    if (user.role === 'admin') return <Navigate to="/admin" />;
-    if (user.role === 'donor') return <Navigate to="/donor" />;
-    if (user.role === 'ngo') return <Navigate to="/ngo" />;
-    if (user.role === 'delivery') return <Navigate to="/delivery" />;
+    if (user.role === 'admin') return <Navigate to="/admin" replace />;
+    if (user.role === 'donor') return <Navigate to="/donor" replace />;
+    if (user.role === 'ngo') return <Navigate to="/ngo" replace />;
+    if (user.role === 'delivery') return <Navigate to="/delivery" replace />;
   }
 
   const partners = ['GreenEarth Hostels', 'Taj Hotels', 'BiteBite Caterers', 'City Harvest NGO', 'Hope Foundation'];
@@ -38,10 +38,10 @@ export function LandingPage() {
           <div className="relative">
             <div className="absolute inset-0 bg-emerald-300 rounded-full blur-3xl opacity-30 animate-pulse"></div>
             <img 
-  src={heroImage}
-  alt="People donating food"
-  className="relative rounded-2xl shadow-2xl object-cover h-[500px] w-full"
-/>
+              src={heroImage}
+              alt="People donating food"
+              className="relative rounded-2xl shadow-2xl object-cover h-[500px] w-full"
+            />
           </div>
         </div>
       </div>

@@ -1,8 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { db } from '../utils/db';
+import { useAuth } from '../utils/authContext';
+import { useRealtime } from '../utils/useRealtime';
+import { getAIAllocationSuggestion } from '../utils/aiFeatures';
 import { Donation, FoodCategory, DietType } from '../utils/types';
+import { Navigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
-import { Heart, Clock, CheckCircle, Star, PhoneCall } from 'lucide-react';
+import { Heart, Clock, CheckCircle, Star, PhoneCall, Sparkles } from 'lucide-react';
 
 const IMAGES = {
   'Healthy Meal (Cooked)': 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&h=300&fit=crop',
@@ -12,9 +16,9 @@ const IMAGES = {
 };
 
 export function DonorDashboard() {
-  const user = db.getCurrentUser();
+  const { user } = useAuth();
   const [donations, setDonations] = useState<Donation[]>([]);
-  
+
   const [formData, setFormData] = useState({
     foodName: '',
     category: 'Cooked Food' as FoodCategory,
@@ -25,11 +29,18 @@ export function DonorDashboard() {
     imageSelection: 'Healthy Meal (Cooked)'
   });
 
-  useEffect(() => {
+  const refreshData = useCallback(() => {
     if (user) {
       setDonations(db.getDonations().filter(d => d.donorId === user.id));
     }
   }, [user]);
+
+  useEffect(() => {
+    refreshData();
+  }, [refreshData]);
+
+  // Real-time: auto-refresh when other users update data
+  useRealtime(refreshData);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,16 +50,21 @@ export function DonorDashboard() {
       id: Math.random().toString(36).substr(2, 9),
       donorId: user.id,
       donorName: user.name,
-      ...formData,
+      foodName: formData.foodName,
+      category: formData.category,
+      dietType: formData.dietType,
+      quantity: formData.quantity,
+      consumableHours: formData.consumableHours,
+      pickupAddress: formData.pickupAddress,
       image: IMAGES[formData.imageSelection as keyof typeof IMAGES],
       status: 'Pending',
       createdAt: new Date().toISOString()
     };
 
     db.saveDonation(newDonation);
-    setDonations([...donations, newDonation]);
+    setDonations(prev => [...prev, newDonation]);
     toast.success("Food donation listed successfully!");
-    
+
     // Reset Form
     setFormData({
       foodName: '',
@@ -61,7 +77,8 @@ export function DonorDashboard() {
     });
   };
 
-  if (!user || user.role !== 'donor') return <div className="p-8 text-center text-red-500">Access Denied</div>;
+  if (!user) return <Navigate to="/auth" replace />;
+  if (user.role !== 'donor') return <div className="p-8 text-center text-red-500">Access Denied</div>;
 
   const stats = {
     total: donations.length,
@@ -69,6 +86,22 @@ export function DonorDashboard() {
     delivered: donations.filter(d => d.status === 'Delivered').length,
     score: (user.rating || 5.0).toFixed(1)
   };
+
+  // AI suggestion for the current form
+  const aiSuggestion = formData.consumableHours > 0 ? getAIAllocationSuggestion({
+    id: '',
+    donorId: user.id,
+    donorName: user.name,
+    foodName: formData.foodName || 'Food item',
+    category: formData.category,
+    dietType: formData.dietType,
+    quantity: formData.quantity || '-',
+    consumableHours: formData.consumableHours,
+    pickupAddress: formData.pickupAddress,
+    image: '',
+    status: 'Pending',
+    createdAt: new Date().toISOString(),
+  }) : null;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -97,7 +130,7 @@ export function DonorDashboard() {
         <div className="lg:col-span-2">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
             <h2 className="text-xl font-bold text-gray-900 mb-6">Post Food Donation Listing</h2>
-            
+
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
@@ -108,8 +141,8 @@ export function DonorDashboard() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Select Typical Representation Food Image *</label>
                   <div className="grid grid-cols-2 gap-2">
                     {Object.entries(IMAGES).map(([name, url]) => (
-                      <div 
-                        key={name} 
+                      <div
+                        key={name}
                         onClick={() => setFormData({...formData, imageSelection: name})}
                         className={`relative cursor-pointer rounded-lg overflow-hidden border-2 h-20 group ${formData.imageSelection === name ? 'border-emerald-500' : 'border-transparent'}`}
                       >
@@ -156,7 +189,19 @@ export function DonorDashboard() {
                   <input required type="text" placeholder="Location" value={formData.pickupAddress} onChange={e => setFormData({...formData, pickupAddress: e.target.value})} className="w-full px-4 py-2 border rounded-md focus:ring-emerald-500 focus:border-emerald-500" />
                 </div>
               </div>
-              
+
+              {/* AI Allocation Suggestion Panel */}
+              {aiSuggestion && (
+                <div className={`p-4 rounded-lg border text-sm ${aiSuggestion.urgencyColor}`}>
+                  <div className="flex items-center gap-2 font-bold mb-1">
+                    <Sparkles className="w-4 h-4" />
+                    AI Allocation Insight — {aiSuggestion.urgencyLevel} Priority
+                  </div>
+                  <p className="mb-1">{aiSuggestion.allocationAdvice}</p>
+                  <p className="opacity-80">💡 {aiSuggestion.servingTip}</p>
+                </div>
+              )}
+
               <button type="submit" className="w-full bg-emerald-600 text-white font-bold py-3 px-4 rounded-md shadow hover:bg-emerald-700 transition">
                 Post Donation
               </button>
@@ -180,8 +225,8 @@ export function DonorDashboard() {
                         <h4 className="font-bold text-gray-900 line-clamp-1">{d.foodName}</h4>
                         <p className="text-xs text-gray-500 mt-1">{d.quantity} • {d.dietType}</p>
                         <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full mt-2
-                          ${d.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' : 
-                            d.status === 'Delivered' ? 'bg-green-100 text-green-800' : 
+                          ${d.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+                            d.status === 'Delivered' ? 'bg-green-100 text-green-800' :
                             'bg-blue-100 text-blue-800'}`}>
                           {d.status}
                         </span>

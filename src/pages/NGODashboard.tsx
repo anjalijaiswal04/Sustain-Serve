@@ -1,10 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { db } from '../utils/db';
+import { useAuth } from '../utils/authContext';
+import { useRealtime } from '../utils/useRealtime';
+import { getAIAllocationSuggestion } from '../utils/aiFeatures';
 import { Donation } from '../utils/types';
+import { Navigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MapPin, CheckCircle, Truck, PhoneCall, Star } from 'lucide-react';
+import { MapPin, CheckCircle, Truck, PhoneCall, Star, Sparkles } from 'lucide-react';
 import L from 'leaflet';
 
 // Fix leaflet marker icons missing issue
@@ -16,19 +20,21 @@ L.Icon.Default.mergeOptions({
 });
 
 export function NGODashboard() {
-  const user = db.getCurrentUser();
+  const { user } = useAuth();
   const [donations, setDonations] = useState<Donation[]>([]);
   const [ratingModal, setRatingModal] = useState<string | null>(null);
   const [ratingData, setRatingData] = useState({ food: 5, delivery: 5, comment: '' });
 
-  useEffect(() => {
-    refreshData();
+  const refreshData = useCallback(() => {
+    setDonations(db.getDonations());
   }, []);
 
-  const refreshData = () => {
-    const all = db.getDonations();
-    setDonations(all);
-  };
+  useEffect(() => {
+    refreshData();
+  }, [refreshData]);
+
+  // Real-time: auto-refresh when data changes in any tab
+  useRealtime(refreshData);
 
   const handleAccept = (id: string) => {
     if (!user) return;
@@ -38,7 +44,7 @@ export function NGODashboard() {
       donation.ngoId = user.id;
       db.updateDonation(donation);
       toast.success("Donation Accepted! Searching for Delivery Partner...");
-      
+
       // Simulate auto-assign delivery after 3 seconds
       setTimeout(() => {
         const d2 = db.getDonations().find(d => d.id === id);
@@ -50,7 +56,7 @@ export function NGODashboard() {
           refreshData();
         }
       }, 3000);
-      
+
       refreshData();
     }
   };
@@ -67,10 +73,18 @@ export function NGODashboard() {
     }
   };
 
-  if (!user || user.role !== 'ngo') return <div className="p-8 text-center text-red-500">Access Denied</div>;
+  if (!user) return <Navigate to="/auth" replace />;
+  if (user.role !== 'ngo') return <div className="p-8 text-center text-red-500">Access Denied</div>;
 
   const availableDonations = donations.filter(d => d.status === 'Pending');
   const myDonations = donations.filter(d => d.ngoId === user.id);
+
+  // Sort available donations by AI priority score (highest first)
+  const sortedAvailable = [...availableDonations].sort((a, b) => {
+    const scoreA = getAIAllocationSuggestion(a).priorityScore;
+    const scoreB = getAIAllocationSuggestion(b).priorityScore;
+    return scoreB - scoreA;
+  });
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -84,8 +98,8 @@ export function NGODashboard() {
             <TileLayer
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-            {availableDonations.map(d => (
-              <Marker key={d.id} position={[28.6139 + (Math.random() - 0.5) * 0.1, 77.2090 + (Math.random() - 0.5) * 0.1]}>
+            {sortedAvailable.map((d, i) => (
+              <Marker key={d.id} position={[28.6139 + (i * 0.02 - 0.04), 77.2090 + (i * 0.02 - 0.04)]}>
                 <Popup>
                   <div className="font-bold">{d.foodName}</div>
                   <div>Qty: {d.quantity}</div>
@@ -98,27 +112,46 @@ export function NGODashboard() {
       </div>
 
       <div className="grid md:grid-cols-2 gap-8">
-        {/* Available List */}
+        {/* Available List — AI sorted by urgency */}
         <div>
-          <h2 className="text-xl font-bold text-gray-900 mb-4">New Postings</h2>
-          {availableDonations.length === 0 ? <p className="text-gray-500">No new postings right now.</p> : null}
+          <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+            New Postings
+            {sortedAvailable.length > 0 && (
+              <span className="text-xs font-normal text-emerald-600 flex items-center gap-1">
+                <Sparkles className="w-3 h-3" /> AI-sorted by urgency
+              </span>
+            )}
+          </h2>
+          {sortedAvailable.length === 0 ? <p className="text-gray-500">No new postings right now.</p> : null}
           <div className="space-y-4">
-            {availableDonations.map(d => (
-              <div key={d.id} className="bg-white p-4 rounded-xl border border-emerald-100 shadow-sm flex flex-col md:flex-row gap-4 justify-between">
-                <div>
-                  <h3 className="font-bold text-lg">{d.foodName}</h3>
-                  <p className="text-sm text-gray-600">Qty: {d.quantity} • {d.dietType} • {d.category}</p>
-                  <p className="text-xs text-red-500 font-semibold mt-1">Expires in {d.consumableHours} hours</p>
-                  <p className="text-sm text-gray-500 mt-2 flex items-center"><MapPin className="w-4 h-4 mr-1" /> {d.pickupAddress}</p>
+            {sortedAvailable.map(d => {
+              const ai = getAIAllocationSuggestion(d);
+              return (
+                <div key={d.id} className="bg-white p-4 rounded-xl border border-emerald-100 shadow-sm flex flex-col md:flex-row gap-4 justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="font-bold text-lg">{d.foodName}</h3>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${ai.urgencyColor}`}>
+                        {ai.urgencyLevel}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600">Qty: {d.quantity} • {d.dietType} • {d.category}</p>
+                    <p className="text-xs text-red-500 font-semibold mt-1">Expires in {d.consumableHours} hours</p>
+                    <p className="text-sm text-gray-500 mt-2 flex items-center"><MapPin className="w-4 h-4 mr-1" /> {d.pickupAddress}</p>
+                    {/* AI allocation tip */}
+                    <p className="text-xs text-emerald-700 mt-2 bg-emerald-50 rounded px-2 py-1">
+                      🤖 {ai.allocationAdvice}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end justify-between">
+                    <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded font-bold">New</span>
+                    <button onClick={() => handleAccept(d.id)} className="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 font-medium whitespace-nowrap">
+                      Accept Donation
+                    </button>
+                  </div>
                 </div>
-                <div className="flex flex-col items-end justify-between">
-                  <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded font-bold">New</span>
-                  <button onClick={() => handleAccept(d.id)} className="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 font-medium whitespace-nowrap">
-                    Accept Donation
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -130,15 +163,15 @@ export function NGODashboard() {
             {myDonations.map(d => (
               <div key={d.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
                 <div className={`absolute top-0 right-0 p-2 text-white text-xs font-bold rounded-bl-lg
-                  ${d.status === 'Accepted' ? 'bg-yellow-500' : 
-                    d.status === 'Assigned' ? 'bg-blue-500' : 
+                  ${d.status === 'Accepted' ? 'bg-yellow-500' :
+                    d.status === 'Assigned' ? 'bg-blue-500' :
                     d.status === 'Picked' ? 'bg-purple-500' :
                     d.status === 'Delivered' ? 'bg-green-500' : 'bg-gray-500'}`}>
                   {d.status}
                 </div>
                 <h3 className="font-bold text-lg mb-1 pr-20">{d.foodName}</h3>
                 <p className="text-sm text-gray-600 mb-3">From: {d.donorName}</p>
-                
+
                 <div className="flex items-center gap-4 text-sm mt-4 border-t pt-3">
                   <a href="tel:9999999999" className="text-emerald-600 flex items-center font-medium hover:underline">
                     <PhoneCall className="w-4 h-4 mr-1" /> Call Donor

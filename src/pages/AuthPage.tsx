@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
-import { db } from '../utils/db';
+import { useAuth } from '../utils/authContext';
 import { Role } from '../utils/types';
 import { LogIn, UserPlus } from 'lucide-react';
 
 export function AuthPage() {
+  const { user, login, register } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [role, setRole] = useState<Role>('donor');
   const [formData, setFormData] = useState({
@@ -16,8 +17,20 @@ export function AuthPage() {
   });
   const navigate = useNavigate();
 
+  // Already logged in — redirect to correct dashboard
+  if (user) {
+    navigate(`/${user.role}`, { replace: true });
+    return null;
+  }
+
   const validate = () => {
-    if (!/^\d{10}$/.test(formData.phone)) {
+    if (!formData.email.includes('@')) {
+      toast.error("Valid email is required");
+      return false;
+    }
+    // For login, admin can use any phone value (we check email+password for admin)
+    const isAdminLogin = isLogin && formData.email === 'admin@sharefood.com';
+    if (!isAdminLogin && !/^\d{10}$/.test(formData.phone)) {
       toast.error("Phone number must be exactly 10 digits");
       return false;
     }
@@ -29,10 +42,6 @@ export function AuthPage() {
       toast.error("Name is required");
       return false;
     }
-    if (!formData.email.includes('@')) {
-      toast.error("Valid email is required");
-      return false;
-    }
     return true;
   };
 
@@ -41,47 +50,30 @@ export function AuthPage() {
     if (!validate()) return;
 
     if (isLogin) {
-      // Allow specific admin login override for simplicity
-      if (formData.email === 'admin@sharefood.com' && formData.password === 'password') {
-        const adminUser = db.getUsers().find(u => u.role === 'admin')!;
-        db.setCurrentUser(adminUser);
-        toast.success("Welcome Admin!");
-        navigate('/admin');
-        window.location.reload();
+      const result = login(formData.phone, formData.password, formData.email);
+      if (!result.success) {
+        toast.error(result.error || "Login failed. Please try again.");
         return;
       }
-
-      const users = db.getUsers();
-      const user = users.find(u => u.phone === formData.phone && u.password === formData.password);
-      
-      if (!user) {
-        toast.error("Invalid credentials or user not registered. Please register first.");
-        return;
-      }
-      
-      db.setCurrentUser(user);
-      toast.success(`Welcome back, ${user.name}!`);
-      navigate(`/${user.role}`);
-      window.location.reload();
+      // Navigate based on the role of the newly logged-in user
+      // We read from auth context — but login() already set the user in context.
+      // We need to find out their role to navigate. Re-read from db since context
+      // updates asynchronously via state.
+      import('../utils/db').then(({ db }) => {
+        const currentUser = db.getCurrentUser();
+        if (currentUser) {
+          toast.success(`Welcome back, ${currentUser.name}!`);
+          navigate(`/${currentUser.role}`, { replace: true });
+        }
+      });
     } else {
-      const users = db.getUsers();
-      if (users.find(u => u.phone === formData.phone)) {
-        toast.error("User with this phone number already exists.");
+      const result = register({ name: formData.name, email: formData.email, phone: formData.phone, password: formData.password, role });
+      if (!result.success) {
+        toast.error(result.error || "Registration failed. Please try again.");
         return;
       }
-      
-      const newUser = {
-        id: Math.random().toString(36).substr(2, 9),
-        ...formData,
-        role,
-        joinedDate: new Date().toISOString()
-      };
-      
-      db.saveUser(newUser);
-      db.setCurrentUser(newUser);
-      toast.success("Registration successful!");
-      navigate(`/${role}`);
-      window.location.reload();
+      toast.success("Registration successful! Welcome aboard.");
+      navigate(`/${role}`, { replace: true });
     }
   };
 

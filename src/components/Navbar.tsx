@@ -1,15 +1,14 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { LogOut, HeartHandshake } from 'lucide-react';
-import { db } from '../utils/db';
+import { useAuth } from '../utils/authContext';
 
 export function Navbar() {
-  const user = db.getCurrentUser();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
-    db.setCurrentUser(null);
+    logout();
     navigate('/');
-    window.location.reload(); // Refresh to clear state
   };
 
   return (

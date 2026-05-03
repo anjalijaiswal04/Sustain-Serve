@@ -1,23 +1,28 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { db } from '../utils/db';
+import { useAuth } from '../utils/authContext';
+import { useRealtime } from '../utils/useRealtime';
 import { Donation } from '../utils/types';
+import { Navigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MapPin, Navigation, PhoneCall, CheckCircle, Package } from 'lucide-react';
-import L from 'leaflet';
 
 export function DeliveryDashboard() {
-  const user = db.getCurrentUser();
+  const { user } = useAuth();
   const [donations, setDonations] = useState<Donation[]>([]);
+
+  const refreshData = useCallback(() => {
+    setDonations(db.getDonations());
+  }, []);
 
   useEffect(() => {
     refreshData();
-  }, []);
+  }, [refreshData]);
 
-  const refreshData = () => {
-    setDonations(db.getDonations());
-  };
+  // Real-time: auto-refresh when data changes in any tab
+  useRealtime(refreshData);
 
   const updateStatus = (id: string, newStatus: Donation['status']) => {
     const donation = db.getDonations().find(d => d.id === id);
@@ -29,10 +34,10 @@ export function DeliveryDashboard() {
     }
   };
 
-  if (!user || user.role !== 'delivery') return <div className="p-8 text-center text-red-500">Access Denied</div>;
+  if (!user) return <Navigate to="/auth" replace />;
+  if (user.role !== 'delivery') return <div className="p-8 text-center text-red-500">Access Denied</div>;
 
-  // Let's pretend user.id matches 'del_123' used in the auto-assign or real logic later.
-  // We'll show any "Assigned" as a pending task for the demo.
+  // Show all Assigned/Picked/OnTheWay donations as tasks for the delivery agent
   const myTasks = donations.filter(d => ['Assigned', 'Picked', 'OnTheWay'].includes(d.status));
   const completed = donations.filter(d => d.status === 'Delivered');
 
@@ -85,19 +90,19 @@ export function DeliveryDashboard() {
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 border-t pt-4">
-                  <button 
+                  <button
                     disabled={d.status !== 'Assigned'}
                     onClick={() => updateStatus(d.id, 'Picked')}
                     className={`py-2 rounded text-sm font-bold ${d.status === 'Assigned' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-100 text-gray-400'}`}>
                     Mark Picked
                   </button>
-                  <button 
+                  <button
                     disabled={d.status !== 'Picked'}
                     onClick={() => updateStatus(d.id, 'OnTheWay')}
                     className={`py-2 rounded text-sm font-bold ${d.status === 'Picked' ? 'bg-yellow-500 text-white hover:bg-yellow-600' : 'bg-gray-100 text-gray-400'}`}>
                     On Way
                   </button>
-                  <button 
+                  <button
                     disabled={d.status !== 'OnTheWay'}
                     onClick={() => updateStatus(d.id, 'Delivered')}
                     className={`py-2 rounded text-sm font-bold ${d.status === 'OnTheWay' ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-100 text-gray-400'}`}>
