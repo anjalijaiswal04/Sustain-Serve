@@ -4,12 +4,12 @@ import { useAuth } from '../utils/authContext';
 import { useRealtime } from '../utils/useRealtime';
 import { getAIAllocationSuggestion } from '../utils/aiFeatures';
 import { getFreshnessTime } from '../utils/freshness';
-import { Donation } from '../utils/types';
+import { Donation, User } from '../utils/types';
 import { Navigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MapPin, CheckCircle, Truck, PhoneCall, Star, Sparkles, Timer } from 'lucide-react';
+import { MapPin, CheckCircle, Truck, PhoneCall, Star, Sparkles, Timer, User as UserIcon, X } from 'lucide-react';
 import L from 'leaflet';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -19,7 +19,6 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-// Live countdown component — re-calculates every 30 seconds
 function FreshnessBar({ createdAt, consumableHours }: { createdAt: string; consumableHours: number }) {
   const [info, setInfo] = useState(() => getFreshnessTime(createdAt, consumableHours));
   useEffect(() => {
@@ -43,37 +42,145 @@ function FreshnessBar({ createdAt, consumableHours }: { createdAt: string; consu
   );
 }
 
+// ─── Assign Delivery Agent Modal ─────────────────────────────────────────────
+function AssignAgentModal({
+  donation,
+  agents,
+  onAssign,
+  onClose,
+}: {
+  donation: Donation;
+  agents: User[];
+  onAssign: (donationId: string, agent: User) => void;
+  onClose: () => void;
+}) {
+  const [selected, setSelected] = useState<string>('');
+
+  const handleConfirm = () => {
+    const agent = agents.find(a => a.id === selected);
+    if (!agent) { toast.error('Please select a delivery agent.'); return; }
+    onAssign(donation.id, agent);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900">Assign Delivery Agent</h3>
+            <p className="text-xs text-gray-500 mt-0.5 truncate max-w-xs">{donation.foodName} · {donation.quantity}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Agent list */}
+        <div className="px-5 py-4 max-h-72 overflow-y-auto space-y-2">
+          {agents.length === 0 ? (
+            <div className="text-center py-8 text-gray-500 text-sm">
+              <UserIcon className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+              <p>No delivery agents registered yet.</p>
+              <p className="text-xs mt-1 text-gray-400">Ask agents to register with the "Delivery" role.</p>
+            </div>
+          ) : (
+            agents.map(agent => (
+              <button
+                key={agent.id}
+                type="button"
+                onClick={() => setSelected(agent.id)}
+                className={`w-full text-left flex items-center gap-3 px-3 py-3 rounded-lg border-2 transition
+                  ${selected === agent.id
+                    ? 'border-emerald-500 bg-emerald-50'
+                    : 'border-gray-200 hover:border-emerald-300 hover:bg-gray-50'}`}
+              >
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0
+                  ${selected === agent.id ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-600'}`}>
+                  {agent.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`font-semibold text-sm truncate ${selected === agent.id ? 'text-emerald-800' : 'text-gray-900'}`}>
+                    {agent.name}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate">{agent.phone} · {agent.email}</p>
+                </div>
+                {selected === agent.id && (
+                  <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                )}
+              </button>
+            ))
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t flex gap-3">
+          <button onClick={onClose}
+            className="flex-1 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
+            Cancel
+          </button>
+          <button onClick={handleConfirm} disabled={!selected}
+            className={`flex-1 py-2 rounded-lg text-sm font-bold transition
+              ${selected
+                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+            Assign Agent
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export function NGODashboard() {
   const { user } = useAuth();
   const [donations, setDonations] = useState<Donation[]>([]);
+  const [agents, setAgents] = useState<User[]>([]);
+  const [assignModal, setAssignModal] = useState<Donation | null>(null);
   const [ratingModal, setRatingModal] = useState<string | null>(null);
   const [ratingData, setRatingData] = useState({ food: 5, delivery: 5, comment: '' });
 
-  const refreshData = useCallback(() => setDonations(db.getDonations()), []);
+  const refreshData = useCallback(() => {
+    setDonations(db.getDonations());
+    // Load only registered delivery-role users
+    setAgents(db.getUsers().filter(u => u.role === 'delivery'));
+  }, []);
 
   useEffect(() => { refreshData(); }, [refreshData]);
   useRealtime(refreshData);
 
+  // Step 1: Accept the donation (Pending → Accepted), open agent picker
   const handleAccept = (id: string) => {
     if (!user) return;
     const donation = db.getDonations().find(d => d.id === id);
-    if (donation) {
-      donation.status = 'Accepted';
-      donation.ngoId = user.id;
-      db.updateDonation(donation);
-      toast.success('Donation Accepted! Searching for Delivery Partner...');
-      setTimeout(() => {
-        const d2 = db.getDonations().find(d => d.id === id);
-        if (d2) {
-          d2.status = 'Assigned';
-          d2.deliveryId = 'del_123';
-          db.updateDonation(d2);
-          toast.success('Delivery Partner Assigned!');
-          refreshData();
-        }
-      }, 3000);
-      refreshData();
-    }
+    if (!donation) return;
+    donation.status = 'Accepted';
+    donation.ngoId = user.id;
+    donation.ngoName = user.name;
+    db.updateDonation(donation);
+    toast.success('Donation accepted! Now choose a delivery agent.');
+    refreshData();
+    setAssignModal(donation);
+  };
+
+  // Step 2: Assign a specific agent (Accepted → Assigned)
+  const handleAssign = (donationId: string, agent: User) => {
+    const donation = db.getDonations().find(d => d.id === donationId);
+    if (!donation) return;
+    donation.status = 'Assigned';
+    donation.deliveryId = agent.id;
+    donation.deliveryName = agent.name;
+    donation.deliveryPhone = agent.phone;
+    db.updateDonation(donation);
+    toast.success(`Delivery assigned to ${agent.name}. They'll see it instantly!`);
+    refreshData();
+  };
+
+  // Re-assign: open modal for already-accepted donations
+  const handleReassign = (donation: Donation) => {
+    setAssignModal(donation);
   };
 
   const handleRate = () => {
@@ -94,7 +201,6 @@ export function NGODashboard() {
   const availableDonations = donations.filter(d => d.status === 'Pending');
   const myDonations = donations.filter(d => d.ngoId === user.id);
 
-  // Sort by AI priority score (most urgent first)
   const sortedAvailable = [...availableDonations].sort((a, b) =>
     getAIAllocationSuggestion(b).priorityScore - getAIAllocationSuggestion(a).priorityScore
   );
@@ -159,20 +265,15 @@ export function NGODashboard() {
                       </p>
                     </div>
                   </div>
-
-                  {/* Freshness progress bar */}
                   <FreshnessBar createdAt={d.createdAt} consumableHours={d.consumableHours} />
-
-                  {/* AI tip */}
                   <p className="text-xs text-emerald-700 mt-2 bg-emerald-50 rounded px-2 py-1">
                     🤖 {ai.allocationAdvice}
                   </p>
-
                   <div className="flex justify-between items-center mt-3">
                     <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded font-bold">New</span>
                     <button onClick={() => handleAccept(d.id)}
                       className="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 font-medium text-sm">
-                      Accept Donation
+                      Accept &amp; Assign Agent
                     </button>
                   </div>
                 </div>
@@ -183,7 +284,7 @@ export function NGODashboard() {
 
         {/* My Accepted Donations */}
         <div>
-          <h2 className="text-xl font-bold text-gray-900 mb-4">My Deliveries & Tracking</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-4">My Deliveries &amp; Tracking</h2>
           {myDonations.length === 0 && <p className="text-gray-500">You haven't accepted any donations yet.</p>}
           <div className="space-y-4">
             {myDonations.map(d => {
@@ -205,7 +306,34 @@ export function NGODashboard() {
                     </div>
                   </div>
 
-                  {/* Freshness bar for accepted donations */}
+                  {/* Delivery agent info */}
+                  {d.deliveryId ? (
+                    <div className="mt-2 flex items-center gap-2 text-sm">
+                      <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                        <UserIcon className="w-3.5 h-3.5 text-blue-600" />
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-800">{d.deliveryName}</span>
+                        {d.deliveryPhone && (
+                          <span className="text-gray-400 text-xs ml-2">{d.deliveryPhone}</span>
+                        )}
+                      </div>
+                      {!['Delivered', 'Picked', 'OnTheWay'].includes(d.status) && (
+                        <button
+                          onClick={() => handleReassign(d)}
+                          className="ml-auto text-xs text-blue-600 hover:underline font-medium">
+                          Re-assign
+                        </button>
+                      )}
+                    </div>
+                  ) : d.status === 'Accepted' ? (
+                    <button
+                      onClick={() => handleReassign(d)}
+                      className="mt-2 flex items-center gap-1.5 text-sm text-orange-600 font-medium hover:underline">
+                      <Truck className="w-4 h-4" /> Assign delivery agent
+                    </button>
+                  ) : null}
+
                   {!freshness.isExpired && d.status !== 'Delivered' && (
                     <FreshnessBar createdAt={d.createdAt} consumableHours={d.consumableHours} />
                   )}
@@ -215,9 +343,9 @@ export function NGODashboard() {
                       <PhoneCall className="w-4 h-4 mr-1" /> Call Donor
                     </a>
                     {['Assigned', 'Picked', 'OnTheWay'].includes(d.status) && (
-                      <a href="#" className="text-blue-600 flex items-center font-medium hover:underline">
-                        <Truck className="w-4 h-4 mr-1" /> Track Delivery
-                      </a>
+                      <span className="text-blue-600 flex items-center font-medium">
+                        <Truck className="w-4 h-4 mr-1" /> In Transit
+                      </span>
                     )}
                     {d.status === 'Delivered' && !d.ratings && (
                       <button onClick={() => setRatingModal(d.id)}
@@ -238,11 +366,21 @@ export function NGODashboard() {
         </div>
       </div>
 
+      {/* Assign Agent Modal */}
+      {assignModal && (
+        <AssignAgentModal
+          donation={assignModal}
+          agents={agents}
+          onAssign={handleAssign}
+          onClose={() => setAssignModal(null)}
+        />
+      )}
+
       {/* Rating Modal */}
       {ratingModal && (
         <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
-            <h3 className="text-2xl font-bold mb-4">Rate Delivery & Food</h3>
+            <h3 className="text-2xl font-bold mb-4">Rate Delivery &amp; Food</h3>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Food Quality (1-5)</label>

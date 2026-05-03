@@ -28,7 +28,10 @@ export interface Donation {
   image: string; // URL
   status: 'Pending' | 'Accepted' | 'Assigned' | 'Picked' | 'OnTheWay' | 'Delivered' | 'Expired';
   ngoId?: string;
+  ngoName?: string;
   deliveryId?: string;
+  deliveryName?: string;
+  deliveryPhone?: string;
   createdAt: string;
   ratings?: {
     food?: number;
