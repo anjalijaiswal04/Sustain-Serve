@@ -12,8 +12,84 @@ import { Navigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import {
   Heart, Clock, CheckCircle, Star, PhoneCall,
-  Sparkles, Upload, X, Timer, CalendarClock, Hourglass,
+  Sparkles, Upload, X, Timer, CalendarClock, Hourglass, ChevronDown,
 } from 'lucide-react';
+
+// ─── SmartSelect: custom dropdown that flips upward when near screen bottom ───
+interface SmartSelectProps {
+  value: string;
+  onChange: (val: string) => void;
+  options: { value: string; label: string }[];
+}
+function SmartSelect({ value, onChange, options }: SmartSelectProps) {
+  const [open, setOpen] = useState(false);
+  const [openUp, setOpenUp] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const toggle = () => {
+    if (!open && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const menuHeight = options.length * 44 + 8;
+      setOpenUp(spaceBelow < menuHeight && rect.top > menuHeight);
+    }
+    setOpen(o => !o);
+  };
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        triggerRef.current && !triggerRef.current.contains(e.target as Node) &&
+        menuRef.current && !menuRef.current.contains(e.target as Node)
+      ) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const selectedLabel = options.find(o => o.value === value)?.label ?? value;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        ref={triggerRef}
+        onClick={toggle}
+        className="w-full px-4 py-2 border rounded-md bg-white text-left flex items-center justify-between
+          focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500
+          hover:border-emerald-400 transition text-sm text-gray-900"
+      >
+        <span>{selectedLabel}</span>
+        <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div
+          ref={menuRef}
+          className={`absolute z-50 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-xl
+            overflow-hidden ${openUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+        >
+          {options.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => { onChange(opt.value); setOpen(false); }}
+              className={`w-full text-left px-4 py-2.5 text-sm transition
+                ${opt.value === value
+                  ? 'bg-emerald-50 text-emerald-800 font-semibold'
+                  : 'text-gray-800 hover:bg-gray-50'}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const PRESET_IMAGES: Record<string, string> = {
   'Healthy Meal (Cooked)': 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&h=300&fit=crop',
@@ -376,24 +452,28 @@ export function DonorDashboard() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                  <select value={formData.category}
-                    onChange={e => setFormData(p => ({ ...p, category: e.target.value as FoodCategory }))}
-                    className="w-full px-4 py-2 border rounded-md focus:ring-emerald-500 focus:border-emerald-500 bg-white">
-                    <option value="Cooked Food">Cooked Food</option>
-                    <option value="Raw Veggies">Raw Veggies</option>
-                    <option value="Packed Grains">Grains/Legumes (Packed)</option>
-                    <option value="Bakery">Breads/Bakery</option>
-                  </select>
+                  <SmartSelect
+                    value={formData.category}
+                    onChange={val => setFormData(p => ({ ...p, category: val as FoodCategory }))}
+                    options={[
+                      { value: 'Cooked Food',   label: 'Cooked Food' },
+                      { value: 'Raw Veggies',   label: 'Raw Veggies' },
+                      { value: 'Packed Grains', label: 'Grains/Legumes (Packed)' },
+                      { value: 'Bakery',        label: 'Breads/Bakery' },
+                    ]}
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Diet Type</label>
-                  <select value={formData.dietType}
-                    onChange={e => setFormData(p => ({ ...p, dietType: e.target.value as DietType }))}
-                    className="w-full px-4 py-2 border rounded-md focus:ring-emerald-500 focus:border-emerald-500 bg-white">
-                    <option value="Veg">Veg</option>
-                    <option value="Non-Veg">Non-Veg</option>
-                    <option value="Vegan">Vegan</option>
-                  </select>
+                  <SmartSelect
+                    value={formData.dietType}
+                    onChange={val => setFormData(p => ({ ...p, dietType: val as DietType }))}
+                    options={[
+                      { value: 'Veg',     label: 'Veg' },
+                      { value: 'Non-Veg', label: 'Non-Veg' },
+                      { value: 'Vegan',   label: 'Vegan' },
+                    ]}
+                  />
                 </div>
               </div>
 
