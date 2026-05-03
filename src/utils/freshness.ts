@@ -77,6 +77,21 @@ export function getFreshnessTime(createdAt: string, consumableHours: number): Fr
 }
 
 // ---------------------------------------------------------------------------
+// Posted-ago timer ("2h 15m ago", "Just now", etc.)
+// ---------------------------------------------------------------------------
+
+export function getPostedAgo(createdAt: string): string {
+  const ms = Date.now() - new Date(createdAt).getTime();
+  if (ms < 60_000) return 'Just now';
+  const totalMin = Math.floor(ms / 60_000);
+  if (totalMin < 60) return `${totalMin}m ago`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (m === 0) return `${h}h ago`;
+  return `${h}h ${m}m ago`;
+}
+
+// ---------------------------------------------------------------------------
 // Image Resize (client-side, before upload/store)
 // ---------------------------------------------------------------------------
 
