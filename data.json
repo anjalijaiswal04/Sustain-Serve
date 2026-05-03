@@ -1,0 +1,22 @@
+{
+  "users": [
+    {
+      "id": "1",
+      "name": "Admin User",
+      "email": "admin@sharefood.com",
+      "phone": "1234567890",
+      "password": "password",
+      "role": "admin"
+    },
+    {
+      "id": "cwin7kv3z",
+      "name": "D",
+      "email": "d@gmail.com",
+      "phone": "9879879878",
+      "password": "123456",
+      "role": "donor"
+    }
+  ],
+  "donations": [],
+  "deliveries": []
+}
