@@ -106,84 +106,191 @@ export function resizeImage(file: File, maxW = 480, maxH = 360, quality = 0.75):
 // ---------------------------------------------------------------------------
 
 export interface ImageFreshnessResult {
-  score: number;       // 0-100
+  score: number;           // 0-100 (0 = not food / error)
   label: string;
   color: string;
   advice: string;
   isAnalyzing: boolean;
+  isFoodDetected: boolean; // false → image rejected, not a food photo
 }
 
+// ---------------------------------------------------------------------------
+// Internal: per-pixel helpers
+// ---------------------------------------------------------------------------
+
+/** Kovac et al. skin-tone detection in RGB space */
+function isSkinPixel(r: number, g: number, b: number): boolean {
+  const maxC = Math.max(r, g, b);
+  const minC = Math.min(r, g, b);
+  return (
+    r > 95 && g > 40 && b > 20 &&
+    maxC - minC > 15 &&
+    Math.abs(r - g) > 15 &&
+    r > g && r > b
+  );
+}
+
+/**
+ * Returns true if the pixel colour matches a common food signature.
+ * Covers: leafy greens, citrus, red/orange cooked food, yellow grains,
+ * brown bread/meat, white rice/dairy, deep red fruit, etc.
+ */
+function isFoodPixel(r: number, g: number, b: number): boolean {
+  // Leafy green (spinach, broccoli, herbs)
+  if (g > 80 && g > r * 1.15 && g > b * 1.1 && g < 210) return true;
+
+  // Vivid orange / carrot / curry
+  if (r > 160 && g > 70 && g < 160 && b < 80 && r - b > 80) return true;
+
+  // Red (tomato, strawberry, chilli)
+  if (r > 140 && g < 80 && b < 80 && r - g > 60) return true;
+
+  // Deep yellow / golden (dal, rice, banana, corn)
+  if (r > 150 && g > 120 && b < 90 && r - b > 70 && g - b > 40) return true;
+
+  // Warm brown / tan (bread, roti, meat, lentils, pakora)
+  if (r > 100 && g > 60 && b > 30 && b < 110 &&
+      r > g && r > b && r - b > 30 && r - b < 130 && g - b < 60) return true;
+
+  // White / cream (rice, milk, paneer, idli) — not too grey
+  if (r > 180 && g > 170 && b > 150 && r - b < 60 && r > b) return true;
+
+  // Purple / violet (eggplant, beetroot)
+  if (b > 80 && r > 80 && b - g > 20 && r - g > 15 && (r + b) / 2 > g + 20) return true;
+
+  return false;
+}
+
+/** Convert RGB → HSL saturation [0-1] */
+function getSaturation(r: number, g: number, b: number): number {
+  const rf = r / 255, gf = g / 255, bf = b / 255;
+  const max = Math.max(rf, gf, bf);
+  const min = Math.min(rf, gf, bf);
+  const l = (max + min) / 2;
+  if (max === min) return 0;
+  const d = max - min;
+  return l > 0.5 ? d / (2 - max - min) : d / (max + min);
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 export function analyzeImageFreshness(dataUrl: string): Promise<ImageFreshnessResult> {
+  const NOT_FOOD: ImageFreshnessResult = {
+    score: 0,
+    label: 'No Food Detected',
+    color: 'text-red-700 bg-red-50 border-red-300',
+    advice: 'The image does not appear to contain food. Please upload a clear photo of the food you are donating.',
+    isAnalyzing: false,
+    isFoodDetected: false,
+  };
+
   return new Promise((resolve) => {
     const img = new Image();
+
     img.onload = () => {
+      // Render at a fixed size for consistent analysis
+      const W = 240, H = 180;
       const canvas = document.createElement('canvas');
-      const W = Math.min(img.width, 200);
-      const H = Math.min(img.height, 150);
       canvas.width = W;
       canvas.height = H;
       const ctx = canvas.getContext('2d')!;
       ctx.drawImage(img, 0, 0, W, H);
 
-      // Sample the central 50% of the image to avoid background interference
-      const x0 = Math.floor(W * 0.25);
-      const y0 = Math.floor(H * 0.25);
-      const sw = Math.floor(W * 0.5);
-      const sh = Math.floor(H * 0.5);
-      const imageData = ctx.getImageData(x0, y0, sw, sh);
-      const { data } = imageData;
-      const count = data.length / 4;
+      // ── Step 1: scan the FULL frame for skin / food pixel ratios ──────────
+      const full = ctx.getImageData(0, 0, W, H);
+      const { data: d, } = full;
+      const total = W * H;
 
+      let skinCount = 0;
+      let foodCount = 0;
+      let vividCount = 0;
+      let darkCount = 0;
       let sumR = 0, sumG = 0, sumB = 0;
-      let darkPixels = 0, brownPixels = 0, vividPixels = 0;
 
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i], g = data[i + 1], b = data[i + 2];
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i], g = d[i + 1], b = d[i + 2];
         sumR += r; sumG += g; sumB += b;
 
-        const brightness = (r + g + b) / 3;
-        if (brightness < 60) darkPixels++;
+        if (isSkinPixel(r, g, b)) skinCount++;
+        if (isFoodPixel(r, g, b)) foodCount++;
 
-        // Brownish: R dominant, low B, G moderate
-        if (r > 100 && g > 60 && g < r && b < 80) brownPixels++;
+        const sat = getSaturation(r, g, b);
+        if (sat > 0.25 && (r + g + b) / 3 > 50) vividCount++;
 
-        // Vivid / colorful
-        const maxC = Math.max(r, g, b);
-        const minC = Math.min(r, g, b);
-        if (maxC - minC > 60 && maxC > 80) vividPixels++;
+        if ((r + g + b) / 3 < 55) darkCount++;
       }
 
-      const avgR = sumR / count;
-      const avgG = sumG / count;
-      const avgB = sumB / count;
+      const skinRatio = skinCount / total;
+      const foodRatio = foodCount / total;
+      const vividRatio = vividCount / total;
+      const darkRatio = darkCount / total;
+
+      const avgR = sumR / total;
+      const avgG = sumG / total;
+      const avgB = sumB / total;
       const brightness = (avgR + avgG + avgB) / 3;
-      const darkRatio = darkPixels / count;
-      const brownRatio = brownPixels / count;
-      const vividRatio = vividPixels / count;
 
-      // Scoring
-      let score = 55;
+      // ── Step 2: Food vs Non-food classification ───────────────────────────
+      //
+      // Logic:
+      //   • Reject if skin dominates and food colours are weak
+      //     (handles human portraits, selfies, etc.)
+      //   • Reject if image is almost entirely a flat/uniform surface
+      //     (solid backgrounds, blank walls — very low vibrancy)
+      //   • Accept if there is meaningful food-colour coverage
 
-      // Good brightness range
-      if (brightness > 80 && brightness < 210) score += 15;
-      else if (brightness < 40) score -= 25;
-      else if (brightness > 230) score -= 5;
+      const skinDominant = skinRatio > 0.30;
+      const foodWeak = foodRatio < 0.18;
+      const tooFlat = vividRatio < 0.08 && foodRatio < 0.12;
 
-      // Vibrancy = freshness
-      score += Math.round(vividRatio * 30);
+      // Human / non-food portrait
+      if (skinDominant && foodWeak) {
+        resolve(NOT_FOOD);
+        return;
+      }
 
-      // Brown/dull = less fresh
-      score -= Math.round(brownRatio * 35);
+      // Completely uniform / non-food scene (plain wall, sky, fabric, etc.)
+      if (tooFlat && skinRatio < 0.05) {
+        resolve(NOT_FOOD);
+        return;
+      }
 
-      // Dark = concerning
-      score -= Math.round(darkRatio * 20);
+      // Ambiguous — skin present but some food colours too.
+      // Could be someone holding food; lean toward food if foodRatio is meaningful.
+      if (skinRatio > 0.20 && foodRatio < 0.12) {
+        resolve(NOT_FOOD);
+        return;
+      }
 
-      // Green presence (fresh produce)
-      if (avgG > avgR + 10 && avgG > avgB + 10) score += 10;
+      // ── Step 3: Freshness scoring (food confirmed) ─────────────────────────
+      let score = 50;
 
-      score = Math.max(10, Math.min(96, score));
+      // Brightness sweet-spot for fresh food
+      if (brightness > 75 && brightness < 215) score += 18;
+      else if (brightness < 40) score -= 22;
+      else if (brightness > 230) score -= 8;
+
+      // Colourful food = generally fresher
+      score += Math.round(vividRatio * 28);
+
+      // High food colour coverage
+      score += Math.round(foodRatio * 20);
+
+      // Greens indicate fresh produce
+      if (avgG > avgR + 8 && avgG > avgB + 8) score += 10;
+
+      // Darkness (wilting / over-cooked / mould)
+      score -= Math.round(darkRatio * 22);
+
+      // High skin presence (food partly out of frame?) — slight penalty
+      score -= Math.round(skinRatio * 15);
+
+      score = Math.max(12, Math.min(95, score));
 
       let label: string, color: string, advice: string;
+
       if (score >= 75) {
         label = 'Excellent Freshness';
         color = 'text-emerald-700 bg-emerald-50 border-emerald-300';
@@ -199,14 +306,21 @@ export function analyzeImageFreshness(dataUrl: string): Promise<ImageFreshnessRe
       } else {
         label = 'Low Freshness Detected';
         color = 'text-red-700 bg-red-50 border-red-300';
-        advice = 'Food may be losing freshness. Please verify quality before listing.';
+        advice = 'Food may be losing freshness. Please verify quality carefully before listing.';
       }
 
-      resolve({ score, label, color, advice, isAnalyzing: false });
+      resolve({ score, label, color, advice, isAnalyzing: false, isFoodDetected: true });
     };
 
     img.onerror = () => {
-      resolve({ score: 50, label: 'Unable to Analyse', color: 'text-gray-600 bg-gray-50 border-gray-200', advice: 'Could not read the image. Please try a different photo.', isAnalyzing: false });
+      resolve({
+        score: 0,
+        label: 'Unable to Analyse',
+        color: 'text-gray-600 bg-gray-50 border-gray-200',
+        advice: 'Could not read the image. Please try a different photo.',
+        isAnalyzing: false,
+        isFoodDetected: false,
+      });
     };
 
     img.src = dataUrl;

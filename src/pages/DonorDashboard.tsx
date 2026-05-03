@@ -66,10 +66,20 @@ export function DonorDashboard() {
       setIsAnalyzing(true);
       setAiFreshness(null);
       const resized = await resizeImage(file);
+
+      // Show preview immediately while AI analyses
       setFormData(prev => ({ ...prev, uploadedImage: resized, useUpload: true }));
-      // AI freshness analysis
+
+      // AI food detection + freshness analysis
       const result = await analyzeImageFreshness(resized);
       setAiFreshness(result);
+
+      if (!result.isFoodDetected) {
+        // Not a food image — clear the upload so it can't be submitted
+        setFormData(prev => ({ ...prev, uploadedImage: '', useUpload: false }));
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        toast.error('No food detected in this image. Please upload a food photo.');
+      }
     } catch {
       toast.error('Failed to process image. Please try another.');
     } finally {
@@ -207,15 +217,21 @@ export function DonorDashboard() {
                   {/* AI Freshness from image */}
                   {isAnalyzing && (
                     <div className="text-xs text-emerald-600 flex items-center gap-1 mb-2">
-                      <Sparkles className="w-3 h-3 animate-spin" /> Analysing image freshness...
+                      <Sparkles className="w-3 h-3 animate-spin" /> Detecting food &amp; analysing freshness...
                     </div>
                   )}
                   {aiFreshness && !isAnalyzing && (
                     <div className={`p-2 rounded-lg border text-xs mb-2 ${aiFreshness.color}`}>
                       <div className="flex items-center gap-1 font-bold mb-0.5">
-                        <Sparkles className="w-3 h-3" /> AI: {aiFreshness.label} ({aiFreshness.score}/100)
+                        {aiFreshness.isFoodDetected
+                          ? <><Sparkles className="w-3 h-3" /> AI: {aiFreshness.label} ({aiFreshness.score}/100)</>
+                          : <><X className="w-3 h-3" /> {aiFreshness.label}</>
+                        }
                       </div>
                       <p>{aiFreshness.advice}</p>
+                      {!aiFreshness.isFoodDetected && (
+                        <p className="mt-1 font-semibold">Please upload a clear photo of the food item only.</p>
+                      )}
                     </div>
                   )}
 
