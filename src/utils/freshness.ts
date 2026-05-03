@@ -107,11 +107,129 @@ export function resizeImage(file: File, maxW = 480, maxH = 360, quality = 0.75):
 
 export interface ImageFreshnessResult {
   score: number;           // 0-100 (0 = not food / error)
-  label: string;
-  color: string;
-  advice: string;
   isAnalyzing: boolean;
   isFoodDetected: boolean; // false → image rejected, not a food photo
+}
+
+// ---------------------------------------------------------------------------
+// Category-aware visual report (computed from score + food context)
+// Can be re-computed any time category/foodName changes without re-uploading
+// ---------------------------------------------------------------------------
+
+import { FoodCategory } from './types';
+
+export interface FreshnessVisual {
+  band: 'peak' | 'good' | 'moderate' | 'low' | 'poor';
+  label: string;            // "Peak Freshness", "Good Condition" …
+  badge: string;            // Short status badge text
+  textColor: string;        // Tailwind text colour class
+  bgColor: string;          // Tailwind background class
+  borderColor: string;      // Tailwind border class
+  scoreBarColor: string;    // Tailwind bg for score fill bar
+  imageFilter: string;      // CSS filter() applied to the preview image
+  glowClass: string;        // Tailwind ring/shadow class for the image border
+  appearance: string;       // How the FOOD looks right now — category-specific
+  advice: string;           // What the donor should do
+}
+
+type Band = 'peak' | 'good' | 'moderate' | 'low' | 'poor';
+
+function getBand(score: number): Band {
+  if (score >= 75) return 'peak';
+  if (score >= 55) return 'good';
+  if (score >= 35) return 'moderate';
+  if (score >= 20) return 'low';
+  return 'poor';
+}
+
+const BAND_META: Record<Band, {
+  label: string; badge: string;
+  textColor: string; bgColor: string; borderColor: string; scoreBarColor: string;
+  imageFilter: string; glowClass: string; advice: string;
+}> = {
+  peak: {
+    label: 'Peak Freshness', badge: '✓ Looking Great',
+    textColor: 'text-emerald-800', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-400',
+    scoreBarColor: 'bg-emerald-500',
+    imageFilter: 'saturate(1.25) brightness(1.06) contrast(1.04)',
+    glowClass: 'ring-4 ring-emerald-400/60',
+    advice: 'Great condition — post and distribute immediately for best impact.',
+  },
+  good: {
+    label: 'Good Condition', badge: '↗ Good to Go',
+    textColor: 'text-blue-800', bgColor: 'bg-blue-50', borderColor: 'border-blue-400',
+    scoreBarColor: 'bg-blue-500',
+    imageFilter: 'saturate(1.0) brightness(1.0)',
+    glowClass: 'ring-4 ring-blue-400/50',
+    advice: 'Food is in acceptable shape. Post promptly and ensure pickup within the stated window.',
+  },
+  moderate: {
+    label: 'Moderately Fresh', badge: '~ Still Usable',
+    textColor: 'text-yellow-800', bgColor: 'bg-yellow-50', borderColor: 'border-yellow-400',
+    scoreBarColor: 'bg-yellow-500',
+    imageFilter: 'saturate(0.60) brightness(0.93) contrast(0.97)',
+    glowClass: 'ring-4 ring-yellow-400/50',
+    advice: 'Freshness is fading — prioritise quick pickup. Double-check portion quality before distribution.',
+  },
+  low: {
+    label: 'Below Average', badge: '⚠ Check Before Use',
+    textColor: 'text-orange-800', bgColor: 'bg-orange-50', borderColor: 'border-orange-400',
+    scoreBarColor: 'bg-orange-500',
+    imageFilter: 'saturate(0.30) brightness(0.86) sepia(0.22) contrast(0.94)',
+    glowClass: 'ring-4 ring-orange-400/60',
+    advice: 'Quality is declining. Only post if NGO can inspect on arrival. Consider reducing quantity.',
+  },
+  poor: {
+    label: 'Poor Condition', badge: '✕ Inspect Carefully',
+    textColor: 'text-red-800', bgColor: 'bg-red-50', borderColor: 'border-red-400',
+    scoreBarColor: 'bg-red-600',
+    imageFilter: 'saturate(0.10) brightness(0.76) sepia(0.50) contrast(0.88)',
+    glowClass: 'ring-4 ring-red-500/60',
+    advice: 'Food quality is very low. We recommend not listing unless it has been verified safe by you.',
+  },
+};
+
+// Category-specific appearance text per freshness band
+const APPEARANCE: Record<FoodCategory, Record<Band, string>> = {
+  'Cooked Food': {
+    peak:     'Hot or freshly cooled — vibrant colours, glossy gravies, fluffy grains. Looks exactly as it came off the stove. Zero concern.',
+    good:     'Colours are still appetizing. Surface has cooled; minor skin may have formed on gravies. Visually intact and inviting.',
+    moderate: 'Some drying at edges or surface crust forming on gravies. Colours slightly muted. Needs reheating before serving.',
+    low:      'Visible colour shift — gravies thick/crusted, rice dry or clumped, proteins changing texture. Careful inspection needed.',
+    poor:     'Significant colour change, dried-out surfaces, sauce separation, or starchy clumping evident. Must be inspected for safety before listing.',
+  },
+  'Raw Veggies': {
+    peak:     'Crisp, vibrant, taut skins — leaves stand upright, colours are deep and saturated. Farm-fresh appearance.',
+    good:     'Still fresh-looking with strong colour. Minor outer-leaf softening possible; cores remain firm and edible.',
+    moderate: 'Early wilting visible — outer leaves beginning to soften, slight yellowing at edges. Usable with minimal trimming.',
+    low:      'Clear wilting, yellowing, or light browning on leaves. Root vegetables may have soft spots. Sort before distribution.',
+    poor:     'Significant wilting, discoloration, or mushy patches visible. Sort carefully item-by-item; discard unusable portions.',
+  },
+  'Packed Grains': {
+    peak:     'Packaging pristine and fully sealed. Contents expected to be dry, free-flowing, and fully intact.',
+    good:     'Packaging looks sound with minor surface handling marks. Contents should be well-protected and in good order.',
+    moderate: 'Packaging shows signs of handling or mild wear. Open and check for moisture, clumping, or unusual odour.',
+    low:      'Visible packaging wear or sealing concerns. Inspect contents carefully — discard if moisture or colour change is found.',
+    poor:     'Packaging integrity uncertain. Open and inspect every portion closely; discard if pests, moisture, or off-odour detected.',
+  },
+  'Bakery': {
+    peak:     'Golden-brown crust, soft and springy texture expected. Crumb structure intact, looks freshly baked.',
+    good:     'Still visually appealing. Crust may have softened slightly from cooling, interior texture should be acceptable.',
+    moderate: 'Visible staleness — crust hardening, surface drying. Interior firmer than ideal. Generally safe if no mould present.',
+    low:      'Clearly stale — brittle or hard crust, dry crumb. Inspect all surfaces carefully for any spots or off-odours.',
+    poor:     'Severely stale or dried out. Check every piece closely for mould (especially sealed packaged items) before considering distribution.',
+  },
+};
+
+export function getFreshnessVisual(
+  score: number,
+  category: FoodCategory,
+  _foodName?: string,
+): FreshnessVisual {
+  const band = getBand(score);
+  const meta = BAND_META[band];
+  const appearance = APPEARANCE[category]?.[band] ?? APPEARANCE['Cooked Food'][band];
+  return { band, appearance, ...meta };
 }
 
 // ---------------------------------------------------------------------------
@@ -179,9 +297,6 @@ function getSaturation(r: number, g: number, b: number): number {
 export function analyzeImageFreshness(dataUrl: string): Promise<ImageFreshnessResult> {
   const NOT_FOOD: ImageFreshnessResult = {
     score: 0,
-    label: 'No Food Detected',
-    color: 'text-red-700 bg-red-50 border-red-300',
-    advice: 'The image does not appear to contain food. Please upload a clear photo of the food you are donating.',
     isAnalyzing: false,
     isFoodDetected: false,
   };
@@ -289,38 +404,11 @@ export function analyzeImageFreshness(dataUrl: string): Promise<ImageFreshnessRe
 
       score = Math.max(12, Math.min(95, score));
 
-      let label: string, color: string, advice: string;
-
-      if (score >= 75) {
-        label = 'Excellent Freshness';
-        color = 'text-emerald-700 bg-emerald-50 border-emerald-300';
-        advice = 'Food appears very fresh and vibrant. Ideal for immediate distribution.';
-      } else if (score >= 55) {
-        label = 'Good Freshness';
-        color = 'text-blue-700 bg-blue-50 border-blue-300';
-        advice = 'Food looks acceptably fresh. Suitable for distribution within the listed time window.';
-      } else if (score >= 35) {
-        label = 'Moderate Freshness';
-        color = 'text-yellow-700 bg-yellow-50 border-yellow-300';
-        advice = 'Food appears moderately fresh. Prioritise quick pickup and distribution.';
-      } else {
-        label = 'Low Freshness Detected';
-        color = 'text-red-700 bg-red-50 border-red-300';
-        advice = 'Food may be losing freshness. Please verify quality carefully before listing.';
-      }
-
-      resolve({ score, label, color, advice, isAnalyzing: false, isFoodDetected: true });
+      resolve({ score, isAnalyzing: false, isFoodDetected: true });
     };
 
     img.onerror = () => {
-      resolve({
-        score: 0,
-        label: 'Unable to Analyse',
-        color: 'text-gray-600 bg-gray-50 border-gray-200',
-        advice: 'Could not read the image. Please try a different photo.',
-        isAnalyzing: false,
-        isFoodDetected: false,
-      });
+      resolve({ score: 0, isAnalyzing: false, isFoodDetected: false });
     };
 
     img.src = dataUrl;
