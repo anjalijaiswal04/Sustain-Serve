@@ -320,7 +320,7 @@ export function DonorDashboard() {
   };
 
   if (!user) return <Navigate to="/auth" replace />;
-  if (user.role !== 'donor') return <div className="p-8 text-center text-red-500">Access Denied</div>;
+  if (user.role !== 'donor') return <Navigate to={`/${user.role}`} replace />;
 
   const stats = {
     total: donations.length,

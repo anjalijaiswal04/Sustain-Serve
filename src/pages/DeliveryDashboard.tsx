@@ -70,7 +70,7 @@ export function DeliveryDashboard() {
   };
 
   if (!user) return <Navigate to="/auth" replace />;
-  if (user.role !== 'delivery') return <div className="p-8 text-center text-red-500">Access Denied</div>;
+  if (user.role !== 'delivery') return <Navigate to={`/${user.role}`} replace />;
 
   // Only show tasks assigned to THIS delivery agent
   const myActive = donations.filter(

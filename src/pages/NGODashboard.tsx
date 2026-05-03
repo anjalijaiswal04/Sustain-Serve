@@ -196,7 +196,7 @@ export function NGODashboard() {
   };
 
   if (!user) return <Navigate to="/auth" replace />;
-  if (user.role !== 'ngo') return <div className="p-8 text-center text-red-500">Access Denied</div>;
+  if (user.role !== 'ngo') return <Navigate to={`/${user.role}`} replace />;
 
   const availableDonations = donations.filter(d => d.status === 'Pending');
   const myDonations = donations.filter(d => d.ngoId === user.id);

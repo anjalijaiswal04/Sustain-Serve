@@ -23,6 +23,22 @@
       "phone": "9879879879",
       "password": "123456",
       "role": "delivery"
+    },
+    {
+      "id": "x8tex3iba",
+      "name": "abc",
+      "email": "deli@gmail.com",
+      "phone": "9879879872",
+      "password": "123456",
+      "role": "delivery"
+    },
+    {
+      "id": "gx51b06ap",
+      "name": "abc ngo",
+      "email": "abcngo@gmail.com",
+      "phone": "9876543217",
+      "password": "123456",
+      "role": "ngo"
     }
   ],
   "donations": [
